@@ -1,0 +1,64 @@
+name: Build PocketTracker BR v1 (Braids + Rings)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  portmaster:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    env:
+      BR_SOURCE_SHA256: cddeb33d294d8e8f83330797928050af43ee81c9474af2c1f7f737196eda9b47
+    steps:
+      - name: Checkout new project
+        uses: actions/checkout@v4
+
+      - name: Verify and extract the exact BR source
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "${BR_SOURCE_SHA256}  PocketTracker_BR_v1_Source.zip" | sha256sum --check
+          unzip -q PocketTracker_BR_v1_Source.zip -d extracted
+          test -f extracted/PocketTracker_BR_v1/native/synth/braids_voice.h
+          test -f extracted/PocketTracker_BR_v1/native/synth/rings_voice.h
+          test -f extracted/PocketTracker_BR_v1/native/vendor/mutable/rings/dsp/part.cc
+          test -f extracted/PocketTracker_BR_v1/tools/verify_mutable.py
+          echo "Verified PocketTracker BR v1 source"
+          echo "Repository commit: ${GITHUB_SHA}"
+
+      - name: Test all 47 Braids and 6 Rings models
+        working-directory: extracted/PocketTracker_BR_v1
+        run: bash tests/run_mutable_smoke.sh
+
+      - name: Build AArch64 with the PortMaster glibc floor
+        working-directory: extracted/PocketTracker_BR_v1
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build -t pockettracker-br-v1-build -f shell/Dockerfile.portmaster shell/
+          docker run --rm \
+            -v "$PWD:/src" \
+            -e SRC=/src \
+            -e CMAKE_BUILD_PARALLEL_LEVEL=2 \
+            pockettracker-br-v1-build \
+            bash /src/shell/build-portmaster.sh
+
+      - name: Verify actual DSP in the binary and package PocketTracker BR
+        working-directory: extracted/PocketTracker_BR_v1
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/package_br.py
+          unzip -t release/pockettracker_br.zip
+          cat release/BUILD_INFO.json
+
+      - name: Upload the verified BR package
+        uses: actions/upload-artifact@v4
+        with:
+          name: PocketTracker-BR-v1-RG28XX-run-${{ github.run_number }}-attempt-${{ github.run_attempt }}
+          path: extracted/PocketTracker_BR_v1/release/
+          if-no-files-found: error
+          retention-days: 30
