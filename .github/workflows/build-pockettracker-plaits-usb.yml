@@ -36,6 +36,21 @@ jobs:
           test -f native/vendor/mutable/plaits/dsp/voice.cc
           grep -q '^08460a6' native/vendor/mutable/plaits/PT-UPSTREAM-REVISION
 
+      - name: Fix upstream Plaits TEST printf include for host compilation
+        working-directory: extracted/PocketTracker_BR_v1
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          header = Path('native/vendor/mutable/plaits/user_data.h')
+          source = header.read_text(encoding='utf-8')
+          if '#include <cstdio>' not in source:
+              header.write_text('#include <cstdio>\n' + source, encoding='utf-8')
+          assert '#include <cstdio>' in header.read_text(encoding='utf-8')
+          print('Plaits user_data.h: printf declaration available')
+          PYCODE
+
       - name: Smoke-test 47 Braids, 6 Rings, 24 Plaits and FX picker
         working-directory: extracted/PocketTracker_BR_v1
         shell: bash
