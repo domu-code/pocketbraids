@@ -1,0 +1,76 @@
+name: Build PocketTracker BR Plaits USB
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  portmaster:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    env:
+      BR_SOURCE_SHA256: 1a7aed65a8bbc2f631fb40a6ac80d40c87e751dc823674a6f80de46298ac2b81
+    steps:
+      - name: Checkout source archive and workflow
+        uses: actions/checkout@v4
+
+      - name: Verify and extract the exact source
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "${{ env.BR_SOURCE_SHA256 }}  PocketTracker_Plaits_USB_PortMaster_Source.zip" | sha256sum --check
+          unzip -q PocketTracker_Plaits_USB_PortMaster_Source.zip -d extracted
+          test -f extracted/PocketTracker_BR_v1/native/synth/plaits_voice.h
+          test -f extracted/PocketTracker_BR_v1/native/vendor/mutable/braids/macro_oscillator.cc
+          test -f extracted/PocketTracker_BR_v1/native/vendor/mutable/rings/dsp/part.cc
+          test -f extracted/PocketTracker_BR_v1/shell/build-portmaster.sh
+
+      - name: Fetch pinned original Plaits DSP source
+        working-directory: extracted/PocketTracker_BR_v1
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tools/fetch_plaits.sh
+          test -f native/vendor/mutable/plaits/dsp/voice.cc
+          grep -q '^08460a6' native/vendor/mutable/plaits/PT-UPSTREAM-REVISION
+
+      - name: Smoke-test 47 Braids, 6 Rings, 24 Plaits and FX picker
+        working-directory: extracted/PocketTracker_BR_v1
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tests/run_mutable_smoke.sh
+          bash tests/run_plaits_smoke.sh
+          bash tests/run_synth_fx_schema_smoke.sh
+
+      - name: Build actual AArch64 PortMaster package
+        working-directory: extracted/PocketTracker_BR_v1
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build -t pockettracker-plaits-usb-build -f shell/Dockerfile.portmaster shell/
+          docker run --rm \
+            -v "$PWD:/src" \
+            -e SRC=/src \
+            -e CMAKE_BUILD_PARALLEL_LEVEL=2 \
+            pockettracker-plaits-usb-build \
+            bash /src/shell/build-portmaster.sh
+
+      - name: Verify actual Mutable DSP and package the release
+        working-directory: extracted/PocketTracker_BR_v1
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/package_br.py
+          unzip -t release/pockettracker_br.zip
+          cat release/BUILD_INFO.json
+
+      - name: Upload installable RG28XX PortMaster ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: PocketTracker-BR-Plaits-USB-RG28XX-run-${{ github.run_number }}-attempt-${{ github.run_attempt }}
+          path: extracted/PocketTracker_BR_v1/release/
+          if-no-files-found: error
+          retention-days: 30
